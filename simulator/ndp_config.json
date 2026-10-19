@@ -1,0 +1,17 @@
+{
+    "ndp_config": {
+        "buffer_size": 8192,
+        "vu_width": 1024,
+        "timing_buffer_size": 1024
+    },
+    "pu_config": {
+        "num_lanes": 16,
+        "lane_width": 1024
+    },
+    "memory_config": {
+        "input_addr": "0x10000000",
+        "output_addr": "0x20000000", 
+        "weight_addr": "0x30000000",
+        "kv_addr": "0x40000000"
+    }
+}
