@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 
 #include "common/Common.h"
 
@@ -66,6 +67,13 @@ public:
     void cycle();
 
     void receive_memory_response(MemoryAccess* resp);
+
+    // Read bandwidth microbenchmark (SimulationConfig::read_bw_test_ns > 0).
+    // Keeps the request queue topped up with sequential reads; the in-flight
+    // budget enforced by the Simulator is then the only thing limiting BW.
+    void fill_read_stream();
+    void receive_read_stream_response(MemoryAccess* resp);
+    uint64_t read_stream_bytes() const { return read_stream_bytes_; }
 
     void set_pim_address_mapping(int bg_pos, uint64_t bg_mask, int ba_pos, uint64_t ba_mask) {
         pim_bg_pos_ = bg_pos;
@@ -132,6 +140,14 @@ private:
     std::vector<GPU_Tile> tiles_;
     std::vector<MoeRoutingDebugEntry> moe_routing_debug_;
     size_t next_tile_launch_idx_ = 0; // index of next tile to try launching
+
+    // Read bandwidth microbenchmark state. The map owns every read from the
+    // moment it is generated until DRAM answers it, since DRAM only holds a
+    // raw pointer.
+    addr_type read_stream_base_ = 0;
+    addr_type read_stream_offset_ = 0;
+    uint64_t read_stream_bytes_ = 0; // bytes returned by DRAM so far
+    std::unordered_map<MemoryAccess*, std::shared_ptr<MemoryAccess>> read_stream_inflight_;
 
     // Internal helpers
     void build_layers(int batch_size, int context_len, int hidden_dim, int num_heads, int dtype_bytes);

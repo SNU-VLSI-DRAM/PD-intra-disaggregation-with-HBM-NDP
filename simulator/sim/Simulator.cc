@@ -1,5 +1,6 @@
 #include "sim/Simulator.h"
 #include "ndp/NDP_scheduler.h"
+#include "config/ConfigBuilder.h"
 #include <iostream>
 
 // Default constructor
@@ -34,13 +35,8 @@ Simulator::Simulator(const SimulationConfig& sim_config, const NDPConfig& ndp_co
 	}
 	if (sim_config.bullet) {
 		// Bullet mode: create two GPU instances with split SMs
-		SimulationConfig prefill_cfg = sim_config;
-		prefill_cfg.is_prefill = true;
-		prefill_cfg.sm_count = sim_config.bullet_prefill_sm;
-
-		SimulationConfig decode_cfg = sim_config;
-		decode_cfg.is_prefill = false;
-		decode_cfg.sm_count = sim_config.total_sm_count - sim_config.bullet_prefill_sm;
+		const SimulationConfig prefill_cfg = make_bullet_half_config(sim_config, true);
+		const SimulationConfig decode_cfg = make_bullet_half_config(sim_config, false);
 
 		gpu_prefill = std::make_unique<GPUmodel>(prefill_cfg);
 		gpu_decode = std::make_unique<GPUmodel>(decode_cfg);
@@ -253,22 +249,44 @@ void Simulator::cycle() {
 			} else {
 				if (sim_config.bullet) {
 					// Route response to correct GPU based on gpu_tag
-					if (resp->gpu_tag == 1) {
-						gpu_prefill->receive_memory_response(resp);
-						if (gpu_prefill->outstanding_requests_ > 0) gpu_prefill->outstanding_requests_--;
-					} else if (resp->gpu_tag == 2) {
-						gpu_decode->receive_memory_response(resp);
-						if (gpu_decode->outstanding_requests_ > 0) gpu_decode->outstanding_requests_--;
+					GPUmodel* target = resp->gpu_tag == 1 ? gpu_prefill.get()
+					                 : resp->gpu_tag == 2 ? gpu_decode.get() : nullptr;
+					if (target) {
+						if (target->outstanding_requests_ > 0) target->outstanding_requests_--;
+						if (sim_config.read_bw_test_ns > 0) target->receive_read_stream_response(resp);
+						else target->receive_memory_response(resp);
 					}
 				} else {
-					gpu.receive_memory_response(resp);
 					if (gpu.outstanding_requests_ > 0) gpu.outstanding_requests_--;
+					if (sim_config.read_bw_test_ns > 0) gpu.receive_read_stream_response(resp);
+					else gpu.receive_memory_response(resp);
 				}
 			}
 			pop_count++;
 			dram.pop(ch);
 		}
 	}
+}
+
+void Simulator::report_read_bw() const {
+	// sim_cycles tick at the DRAM clock, two per ns, and 1 byte/ns == 1 GB/s.
+	const double ns = (double)sim_cycles / 2.0;
+	auto line = [&](const char* name, const GPUmodel& g, int sms) {
+		const double gbps = ns > 0 ? (double)g.read_stream_bytes() / ns : 0.0;
+		std::cout << "[Read BW] " << name << ": SMs=" << sms
+		          << " max_outstanding=" << g.max_outstanding_
+		          << " bytes=" << g.read_stream_bytes()
+		          << " BW=" << gbps << " GB/s" << std::endl;
+		return gbps;
+	};
+	double total = 0.0;
+	if (sim_config.bullet) {
+		total += line("prefill", *gpu_prefill, sim_config.bullet_prefill_sm);
+		total += line("decode", *gpu_decode, sim_config.total_sm_count - sim_config.bullet_prefill_sm);
+	} else {
+		total += line("gpu", gpu, sim_config.sm_count > 0 ? sim_config.sm_count : sim_config.total_sm_count);
+	}
+	std::cout << "[Read BW] total: " << total << " GB/s over " << ns << " ns" << std::endl;
 }
 
 bool Simulator::ndp_has_pending_work() const {

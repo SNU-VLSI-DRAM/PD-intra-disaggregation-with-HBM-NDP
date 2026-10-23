@@ -9,6 +9,19 @@ void GPUmodel::init() {
     gpu_cycle_ = 0;
     next_tile_launch_idx_ = 0;
 
+    if (_config.read_bw_test_ns > 0) {
+        // Under bullet the two halves stream disjoint regions, so they contend
+        // for channels and banks but never share a row hit.
+        read_stream_base_ = _config.is_prefill ? 0 : (1ULL << 30);
+        read_stream_offset_ = 0;
+        read_stream_bytes_ = 0;
+        read_stream_inflight_.clear();
+        std::cout << "[Read BW Test] " << (_config.is_prefill ? "prefill" : "decode")
+                  << " GPU streams reads from 0x" << std::hex << read_stream_base_ << std::dec
+                  << " for " << _config.read_bw_test_ns << " ns\n";
+        return;
+    }
+
     // Todo: load base addresses from simulation config
     next_tile_activation_addr_ = _config.base_activation_addr; // reset global sequential address space
     next_tile_param_addr_ = _config.base_param_addr;
@@ -361,7 +374,42 @@ void GPUmodel::advance_inflight() {
     }
 }
 
+void GPUmodel::fill_read_stream() {
+    // Enough queued work that the dispatcher never finds the queue empty
+    // between two GPU cycles; DRAM back-pressure and the in-flight budget
+    // decide how much of it actually goes out.
+    constexpr size_t kQueueDepth = 256;
+    // Wrap within 256 MB so a long run stays inside its region.
+    constexpr addr_type kRegionBytes = 256ULL << 20;
+    while (_memory_request_queue.size() < kQueueDepth) {
+        auto req = std::make_shared<MemoryAccess>();
+        req->dram_address = read_stream_base_ + read_stream_offset_;
+        req->is_ndp = false;
+        req->size = _config.atomic_bytes;
+        req->req_type = MemoryAccessType::READ;
+        req->request = true;
+        req->start_cycle = gpu_cycle_;
+        read_stream_inflight_.emplace(req.get(), req);
+        _memory_request_queue.push(std::move(req));
+        read_stream_offset_ = (read_stream_offset_ + _config.atomic_bytes) % kRegionBytes;
+    }
+}
+
+void GPUmodel::receive_read_stream_response(MemoryAccess* resp) {
+    read_stream_bytes_ += resp->size;
+    // The Simulator mirrors every push into the response queue. Responses can
+    // come back out of order, but the map keeps the in-flight ones alive, so
+    // dropping the oldest entry only bounds the queue.
+    if (!_memory_response_queue.empty()) _memory_response_queue.pop();
+    read_stream_inflight_.erase(resp);
+}
+
 void GPUmodel::cycle() {
+    if (_config.read_bw_test_ns > 0) {
+        fill_read_stream();
+        ++gpu_cycle_;
+        return;
+    }
     // Advance in-flight tiles
     advance_inflight();
     // Try launching new tiles (simple immediate launch model)

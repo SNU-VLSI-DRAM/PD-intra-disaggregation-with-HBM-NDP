@@ -5,6 +5,8 @@
 #include <iostream>
 #include <string>
 
+#include "config/SmBandwidthModel.h"
+
 namespace {
 
 uint64_t align4k(uint64_t addr) {
@@ -102,7 +104,11 @@ SimulationConfig build_sim_config(const ModelConfig& model, const CliOptions& op
     config.target_l2_bytes = 128 * 1024 * 1024;
     config.sm_count = opt.sm_count;
     config.total_sm_count = opt.total_sm_count;
-    config.sm_bw_scaling_factor = opt.sm_bw_scaling_factor;
+    // Under bullet each half resolves its own factor in make_bullet_half_config().
+    config.sm_bw_scaling_factor = opt.sm_bw_scaling_factor != kSmBwScalingFactorAuto
+                                      ? opt.sm_bw_scaling_factor
+                                      : sm_bw_scaling_factor_for(opt.sm_count);
+    config.sm_bw_scaling_factor_auto = opt.sm_bw_scaling_factor == kSmBwScalingFactorAuto;
     config.effective_memory_bw_GBps = opt.effective_bw;
     config.gpu_tiling_mode = opt.gpu_tiling_mode;
 
@@ -134,6 +140,12 @@ SimulationConfig build_sim_config(const ModelConfig& model, const CliOptions& op
     config.chunk_size = opt.chunk_size;
     config.bullet = opt.bullet;
     config.bullet_prefill_sm = opt.bullet_prefill_sm;
+    config.read_bw_test_ns = (cycle_type)std::max(0LL, opt.read_bw_test_ns);
+    // The read test measures what the GPU alone can pull from DRAM, so the NDP
+    // must not compete for it.
+    if (config.read_bw_test_ns > 0) {
+        config.use_ndp = false;
+    }
 
     // Mode-specific overrides. Bullet mode runs two GPU instances against half
     // the channels, so it needs its own DRAM model and derated peak throughput.
@@ -166,6 +178,16 @@ SimulationConfig build_sim_config(const ModelConfig& model, const CliOptions& op
         config.dram_channels = 32;
     }
     return config;
+}
+
+SimulationConfig make_bullet_half_config(const SimulationConfig& sim, bool is_prefill) {
+    SimulationConfig half = sim;
+    half.is_prefill = is_prefill;
+    half.sm_count = is_prefill ? sim.bullet_prefill_sm : sim.total_sm_count - sim.bullet_prefill_sm;
+    if (sim.sm_bw_scaling_factor_auto) {
+        half.sm_bw_scaling_factor = sm_bw_scaling_factor_for(half.sm_count);
+    }
+    return half;
 }
 
 NDPConfig build_ndp_config(NDPConfig ndp, const SimulationConfig& sim, const CliOptions& opt) {

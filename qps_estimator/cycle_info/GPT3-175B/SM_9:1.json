@@ -1,1 +1,1 @@
-{"points": [{"batch": 1, "lin": 32768, "lout": 128, "prefill_ms": 1166.524, "decode_ms": 65.028}]}
+{"points": [{"batch": 1, "lin": 32768, "lout": 128, "prefill_ms": 1160.109, "decode_ms": 41.311}]}

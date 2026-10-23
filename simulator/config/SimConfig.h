@@ -61,7 +61,11 @@ typedef struct SimulationConfig {
     // the whole in-flight budget, max_outstanding_ = sm_count * this, which is
     // what caps the bandwidth a masked GPU can reach -- hence the name. It has
     // no effect at all unless sm_count > 0, where the budget is unlimited.
+    // build_sim_config() and make_bullet_half_config() resolve the CLI's
+    // "auto" into a concrete value for the group's sm_count, so the GPU model
+    // only ever sees a number here.
     int sm_bw_scaling_factor = 5;
+    bool sm_bw_scaling_factor_auto = false; // re-resolve when sm_count changes
     int sector_bytes = 32;         // L2 sector size in bytes
 
     // ---- Parallelism ----
@@ -130,4 +134,9 @@ typedef struct SimulationConfig {
     // Bullet mode: split SMs into prefill + decode groups running concurrently.
     bool bullet = false;
     int bullet_prefill_sm = 0;  // SMs allocated to prefill (rest go to decode)
+    // Read bandwidth microbenchmark: when > 0, every GPU instance skips its
+    // layers and streams sequential reads for this many ns, so the bandwidth
+    // its in-flight budget (sm_count * sm_bw_scaling_factor) allows can be
+    // read off directly. See GPUmodel::fill_read_stream().
+    cycle_type read_bw_test_ns = 0;
 } SimulationConfig;

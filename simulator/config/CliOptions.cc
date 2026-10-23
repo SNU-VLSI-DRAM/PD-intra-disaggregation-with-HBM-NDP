@@ -10,6 +10,7 @@
 
 #include "config/InterconnectModel.h"
 #include "config/ModelZoo.h"
+#include "config/SmBandwidthModel.h"
 
 namespace {
 
@@ -86,9 +87,12 @@ void print_usage(const char* program) {
 "GPU\n"
 "  --sm-count N               masked SM count, 0 = all SMs (default: 0)\n"
 "  --total-sm-count N         SMs on the full GPU (default: 148)\n"
-"  --sm-bw-scaling-factor N   outstanding DRAM requests allowed per active SM, which\n"
-"                             with --sm-count caps the bandwidth a masked GPU can\n"
-"                             reach. Ignored without --sm-count (default: 5)\n"
+"  --sm-bw-scaling-factor N|auto\n"
+"                             outstanding DRAM requests allowed per active SM, which\n"
+"                             with --sm-count or --bullet caps the bandwidth an SM\n"
+"                             group can reach. auto picks it per group from the SM\n"
+"                             count, calibrated against B200 read bandwidth\n"
+"                             (config/SmBandwidthModel.h) (default: auto)\n"
 "  --effective-bw GBPS        analytical memory BW; 0 = run the DRAM model (default: 0)\n"
 "  --tiling reuse|uniform     L2 blocking strategy (default: reuse)\n"
 "\n"
@@ -130,6 +134,12 @@ void print_usage(const char* program) {
 "  --bullet-prefill-sm N      SMs given to prefill in bullet mode (default: 133)\n"
 "  --chunked-prefill[=BOOL]   enable chunked prefill (default: off)\n"
 "  --chunk-size N             prefill chunk size (default: 1024)\n"
+"\n"
+"Microbenchmarks\n"
+"  --read-bw-test NS          stream only reads for NS ns from every GPU instance\n"
+"                             (both halves under --bullet) and report the read\n"
+"                             bandwidth each one reached. Turns the NDP off\n"
+"                             (default: 0 = off)\n"
 "\n"
 "  -h, --help                 show this message\n"
 "\n"
@@ -194,7 +204,12 @@ CliResult parse_cli(int argc, char** argv, CliOptions& opt) {
             else if (key == "--sp")              opt.sp = std::stoi(value_of());
             else if (key == "--sm-count")        opt.sm_count = std::stoi(value_of());
             else if (key == "--total-sm-count")  opt.total_sm_count = std::stoi(value_of());
-            else if (key == "--sm-bw-scaling-factor") opt.sm_bw_scaling_factor = std::stoi(value_of());
+            else if (key == "--sm-bw-scaling-factor") {
+                const std::string v = lower(value_of());
+                opt.sm_bw_scaling_factor = (v == "auto") ? kSmBwScalingFactorAuto : std::stoi(v);
+                if (opt.sm_bw_scaling_factor < 0)
+                    throw std::runtime_error("must be a positive integer or 'auto'");
+            }
             else if (key == "--effective-bw")    opt.effective_bw = std::stod(value_of());
             else if (key == "--tiling")          opt.gpu_tiling_mode = to_enum(value_of(), "--tiling", kTilingNames);
             else if (key == "--pim-parallel-level") opt.pim_parallel_level = std::stoi(value_of());
@@ -215,6 +230,7 @@ CliResult parse_cli(int argc, char** argv, CliOptions& opt) {
             else if (key == "--bullet-prefill-sm") opt.bullet_prefill_sm = std::stoi(value_of());
             else if (key == "--chunked-prefill") opt.chunked_prefill = flag_of();
             else if (key == "--chunk-size")      opt.chunk_size = std::stoi(value_of());
+            else if (key == "--read-bw-test")    opt.read_bw_test_ns = std::stoll(value_of());
             else {
                 std::cerr << "Error: unknown option '" << key << "'. Run with --help.\n";
                 return CliResult::StopFailure;
@@ -288,8 +304,10 @@ void print_cli_summary(const CliOptions& opt) {
     std::cout << "Phase: " << (opt.prefill ? "PREFILL" : "DECODE") << std::endl;
     std::cout << "NDP: " << (opt.use_ndp ? "ON" : "OFF") << std::endl;
     if (opt.sm_count > 0) {
-        std::cout << "SM BW scaling factor: " << opt.sm_bw_scaling_factor
-                  << " outstanding requests per SM" << std::endl;
+        std::cout << "SM BW scaling factor: ";
+        if (opt.sm_bw_scaling_factor == kSmBwScalingFactorAuto) std::cout << "auto";
+        else std::cout << opt.sm_bw_scaling_factor;
+        std::cout << " outstanding requests per SM" << std::endl;
     }
     if (opt.pim_mode) {
         std::cout << "PIM parallel level: " << opt.pim_parallel_level

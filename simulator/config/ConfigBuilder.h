@@ -15,4 +15,9 @@ SimulationConfig build_sim_config(const ModelConfig& model, const CliOptions& op
 // the GPU always share one interconnect model.
 NDPConfig build_ndp_config(NDPConfig from_file, const SimulationConfig& sim, const CliOptions& opt);
 
+// The configuration one half of a bullet split runs on: prefill gets
+// bullet_prefill_sm SMs, decode the rest, each with the in-flight budget its
+// own SM count calls for.
+SimulationConfig make_bullet_half_config(const SimulationConfig& sim, bool is_prefill);
+
 void print_config_summary(const SimulationConfig& sim, const NDPConfig& ndp);

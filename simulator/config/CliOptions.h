@@ -29,8 +29,9 @@ struct CliOptions {
     // ---- GPU ----
     int sm_count = 0;            // 0 = all SMs (no masking)
     int total_sm_count = 148;    // GB200 default
-    // See SimulationConfig::sm_bw_scaling_factor. Only matters with --sm-count.
-    int sm_bw_scaling_factor = 5;
+    // See SimulationConfig::sm_bw_scaling_factor. Only matters with --sm-count
+    // or --bullet. 0 = auto, picked per SM count from config/SmBandwidthModel.h.
+    int sm_bw_scaling_factor = 0;
     double effective_bw = 0.0;   // 0 = DRAM sim; >0 = analytical BW in GB/s
     int gpu_tiling_mode = 0;     // 0 = reuse_optimized, 1 = uniform
 
@@ -72,6 +73,9 @@ struct CliOptions {
     int bullet_prefill_sm = 133;
     bool chunked_prefill = false;
     int chunk_size = 1024;
+
+    // ---- Microbenchmarks ----
+    long long read_bw_test_ns = 0;   // 0 = off; see SimulationConfig::read_bw_test_ns
 };
 
 // Result of parsing. Exit codes let main() distinguish "--help was asked for"

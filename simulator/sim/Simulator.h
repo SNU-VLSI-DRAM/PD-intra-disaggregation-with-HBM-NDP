@@ -21,6 +21,10 @@ public:
 	void cycle();
 
 	bool running() const {
+		// The read test runs for a fixed window rather than to completion.
+		if (sim_config.read_bw_test_ns > 0) {
+			return sim_cycles < 2 * sim_config.read_bw_test_ns;
+		}
 		if (sim_config.bullet) {
 			return !gpu_prefill->gpu_done;
 		}
@@ -34,6 +38,9 @@ public:
 	// GPU initialization (if needed)
 	void initialize_gpu_model(const SimulationConfig& sim_config);
 	
+	// Read bandwidth each GPU instance reached under --read-bw-test.
+	void report_read_bw() const;
+
 	// NDP status queries
 	bool ndp_has_pending_work() const;
 	bool ndp_is_busy() const;

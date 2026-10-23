@@ -86,6 +86,9 @@ int main(int argc, char** argv) {
             sim.cycle();
         }
         report(sim);
+        if (sim_config.read_bw_test_ns > 0) {
+            sim.report_read_bw();
+        }
     } catch (const std::exception& e) {
         std::cerr << "Fatal: " << e.what() << std::endl;
         return 1;
